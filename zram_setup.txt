@@ -1,0 +1,83 @@
+$ sudo gedit /etc/default/grub
+
+//...
+GRUB_CMDLINE_LINUX_DEFAULT=".... zram.num_devices=4"
+//...
+
+$ sudo update-grub
+
+// Создаем скрипты для запуска и остановки 4х устройств zram:
+
+$ sudo gedit /usr/local/bin/zram-start.sh
+//--------------------
+#!/bin/bash
+modprobe zram num_devices=4
+echo '1024M' > /sys/block/zram0/disksize
+echo '1024M' > /sys/block/zram1/disksize
+echo '1024M' > /sys/block/zram2/disksize
+echo '1024M' > /sys/block/zram3/disksize
+mkswap /dev/zram0
+swapon /dev/zram0 -p 10
+mkswap /dev/zram1
+swapon /dev/zram1 -p 10
+mkswap /dev/zram2
+swapon /dev/zram2 -p 10
+mkswap /dev/zram3
+swapon /dev/zram3 -p 10
+//--------------------
+
+$ sudo gedit /usr/local/bin/zram-stop.sh
+//--------------------
+#!/bin/bash
+swapoff /dev/zram0
+swapoff /dev/zram1
+swapoff /dev/zram2
+swapoff /dev/zram3
+echo 1 > /sys/block/zram0/reset
+echo 1 > /sys/block/zram1/reset
+echo 1 > /sys/block/zram2/reset
+echo 1 > /sys/block/zram3/reset
+sleep .5
+modprobe -r zram
+//--------------------
+
+// Обоим скриптам даем права на выполнение:
+$ sudo chmod ugo+x /usr/local/bin/zram-start.sh
+$ sudo chmod ugo+x /usr/local/bin/zram-stop.sh
+
+// Перезагрузка..
+//--------------------
+
+// Тест. Запуск zRam:
+$ sudo /usr/local/bin/zram-start.sh
+
+// Убеждаемся, что количество подкачки увеличилось на 4 Гб:
+$ free -h
+
+// Можно проверить работает ли скрипт отключения:
+$ sudo /usr/local/bin/zram-stop.sh
+
+// Чтобы запускать zram по умолчанию нужно создать для него юнит файл systemd:
+$ sudo systemctl edit --full --force zram.service
+//--------------------
+[Unit]
+Description=zRAM block devices swapping
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/zram-start.sh
+ExecStop=/usr/local/bin/zram-stop.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+//--------------------
+
+// После этого выполним команду daemon-reload, чтобы перечитать конфигурацию systemd:
+$ sudo systemctl daemon-reload
+
+// Запускаем сервис systemd и добавляем его в автозагрузку:
+$ sudo systemctl start zram
+$ sudo systemctl enable zram
+
+// Проверка статуса zram:
+$ sudo systemctl status zram.service
+
